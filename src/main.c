@@ -76,6 +76,8 @@ int main() {
     XftFont *xftFont = XftFontOpenName(dpy, screen, "monospace-14");
     XftDraw *draw = XftDrawCreate(dpy, win, visual, colormap);
 
+    setenv("TERM", "xterm-256color", 1);
+
     // PTY + shell
     int masterFd;
     pid_t pid = forkpty(&masterFd, NULL, NULL, NULL);
@@ -140,7 +142,7 @@ int main() {
             int len = read(masterFd, buf, sizeof(buf));
             if (len > 0) {
                 vterm_input_write(vt, buf, len);
-                vterm_screen_flush_damage(vtermScreen);                
+                vterm_screen_flush_damage(vtermScreen);
             }
         }
 
