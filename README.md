@@ -1,4 +1,5 @@
 # Termemum
+<img src="docs/screenshots/ls-a.png" width=50%>
 Termemum is a simple lightweight terminal emulator written in C for X11. It also works on most Wayland DEs/WMs
 
 ## Prerequisites for building source
