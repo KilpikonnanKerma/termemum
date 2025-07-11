@@ -10,6 +10,4 @@ Make, GCC, VTerm, Xft, freetype 2, libX11
 3. run ``` make install ```
 
 ## Upcoming features
-- Config file / Settings
-- Scrolling
 - Mouse support
