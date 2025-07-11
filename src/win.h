@@ -5,10 +5,13 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xft/Xft.h>
+#include <X11/extensions/sync.h>
 
 #define ushort unsigned short
 #define uint unsigned int
 #define ulong unsigned long
+
+#define MAX_COLORS 1024
 
 typedef struct {
     ushort red;

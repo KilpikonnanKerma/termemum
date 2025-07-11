@@ -21,6 +21,9 @@ Window win;
 
 Wnd window;
 
+XftColor color_cache[MAX_COLORS];
+bool color_cached[MAX_COLORS] = {false};
+
 // Callback to send data from libvterm back to shell
 int write_to_pty(const char *s, long unsigned int len, void *user) {
     int *pty_fd = (int *)user;
@@ -31,22 +34,28 @@ unsigned short convert_color_component(uint8_t val) {
 	return (unsigned short)(val * 257);
 }
 
-XftColor xft_color_from_vterm(Display *dpy, Visual *visual, Colormap colormap, VTermColor *vtcolor) {
-    XRenderColor xrcolor;
-    xrcolor.red   = convert_color_component(vtcolor->rgb.red);
-    xrcolor.green = convert_color_component(vtcolor->rgb.green);
-    xrcolor.blue  = convert_color_component(vtcolor->rgb.blue);
-    xrcolor.alpha = 0xFFFF;
+int get_color_index(VTermColor *c) {
+    return (c->rgb.red * 31 + c->rgb.green * 17 + c->rgb.blue * 13) % MAX_COLORS;
+}
 
-    XftColor xftcolor;
-    if (!XftColorAllocValue(dpy, visual, colormap, &xrcolor, &xftcolor)) {
-        fprintf(stderr, "Failed to allocate color: %d, %d, %d\n", 
-                vtcolor->rgb.red, vtcolor->rgb.green, vtcolor->rgb.blue);
-        // Fallback to white if color allocation fails
-        xftcolor.pixel = WhitePixel(dpy, DefaultScreen(dpy));
-        xftcolor.color = xrcolor;
+XftColor xft_color_from_vterm(Display *dpy, Visual *visual, Colormap colormap, VTermColor *vtcolor) {
+    int idx = get_color_index(vtcolor);
+    if (color_cached[idx]) return color_cache[idx];
+
+    XRenderColor xrcolor = {
+        .red   = convert_color_component(vtcolor->rgb.red),
+        .green = convert_color_component(vtcolor->rgb.green),
+        .blue  = convert_color_component(vtcolor->rgb.blue),
+        .alpha = 0xFFFF
+    };
+
+    if (!XftColorAllocValue(dpy, visual, colormap, &xrcolor, &color_cache[idx])) {
+        xrcolor.red = xrcolor.green = xrcolor.blue = 0xFFFF;
+        color_cache[idx].pixel = WhitePixel(dpy, DefaultScreen(dpy));
+        color_cache[idx].color = xrcolor;
     }
-    return xftcolor;
+    color_cached[idx] = true;
+    return color_cache[idx];
 }
 
 int main() {
@@ -72,7 +81,10 @@ int main() {
     window.cols = window.width / window.char_width;
     window.rows = window.height / window.char_height;
 
-	visual = DefaultVisual(dpy, screen);
+    XVisualInfo vinfo;
+    XMatchVisualInfo(dpy, screen, 32, TrueColor, &vinfo);
+    visual = vinfo.visual;
+
 	colormap = XCreateColormap(dpy, root, visual, AllocNone);
 
 	XSetWindowAttributes attrs;
@@ -84,7 +96,7 @@ int main() {
 	ulong valuemask = CWColormap | CWBackPixel | CWBorderPixel | CWEventMask;
 
     win = XCreateWindow(dpy, root, 100, 100,
-			window.width, window.height, 1, DefaultDepth(dpy, screen),
+			window.width, window.height, 1, vinfo.depth,
 			InputOutput, visual, valuemask, &attrs);
     XMapWindow(dpy, win);
 
@@ -121,18 +133,9 @@ int main() {
 
     VTermColor default_fg, default_bg;
     vterm_state_get_default_colors(vtermState, &default_fg, &default_bg);
-
-    vterm_state_set_palette_color(vtermState, 0, &(VTermColor){.rgb = {0, 0, 0}});       // Black
-    vterm_state_set_palette_color(vtermState, 1, &(VTermColor){.rgb = {255, 0, 0}});     // Red
-    vterm_state_set_palette_color(vtermState, 2, &(VTermColor){.rgb = {0, 255, 0}});     // Green
-    vterm_state_set_palette_color(vtermState, 3, &(VTermColor){.rgb = {255, 255, 0}});   // Yellow
-    vterm_state_set_palette_color(vtermState, 4, &(VTermColor){.rgb = {0, 0, 255}});     // Blue
-    vterm_state_set_palette_color(vtermState, 5, &(VTermColor){.rgb = {255, 0, 255}});   // Magenta
-    vterm_state_set_palette_color(vtermState, 6, &(VTermColor){.rgb = {0, 255, 255}});   // Cyan
-    vterm_state_set_palette_color(vtermState, 7, &(VTermColor){.rgb = {255, 255, 255}}); // White
-
+    
     vterm_screen_enable_altscreen(vtermScreen, 1);
-
+    
     char buf[1024];
 
     XftColor xft_bg;
@@ -171,6 +174,8 @@ int main() {
 
         int maxfd = (masterFd > ConnectionNumber(dpy)) ? masterFd : ConnectionNumber(dpy);
         if (select(maxfd + 1, &fds, NULL, NULL, NULL) < 0) break;
+
+        bool need_redraw = false;
 
         // Shell output
         if (FD_ISSET(masterFd, &fds)) {
@@ -224,14 +229,21 @@ int main() {
                 if (!vterm_screen_get_cell(vtermScreen, pos, &cell)) continue;
                 if (cell.chars[0] == 0) continue;
 
+                vterm_state_convert_color_to_rgb(vtermState, &cell.fg);
+                vterm_state_convert_color_to_rgb(vtermState, &cell.bg);
+
                 XftColor xft_fg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.fg);
                 XftColor xft_bg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.bg);
 
-                XftDrawRect(draw, &xft_bg_cell, 
-                            col * window.char_width, 
-                            row * window.char_height, 
-                            window.char_width, 
-                            window.char_height);
+                if (xft_bg_cell.color.red != bg_render_color.red ||
+                    xft_bg_cell.color.green != bg_render_color.green ||
+                    xft_bg_cell.color.blue != bg_render_color.blue) {
+                    XftDrawRect(draw, &xft_bg_cell,
+                        col * window.char_width,
+                        row * window.char_height,
+                        window.char_width,
+                        window.char_height);
+                }
 
                 // XSetForeground(dpy, gc, WhitePixel(dpy, screen));
 
