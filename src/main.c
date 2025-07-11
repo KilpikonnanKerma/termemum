@@ -1,6 +1,3 @@
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xft/Xft.h>
 #include <vterm.h>
 #include <termios.h>
 #include <stdlib.h>
@@ -11,10 +8,18 @@
 #include <fcntl.h>
 #include <sys/select.h>
 
+#include "win.h"
 #include "input.h"
+#include "config.h"
 
-#define FONT_WIDTH 10
-#define FONT_HEIGHT 16
+XftFont *xftFont;
+XftDraw *draw;
+Display *dpy;
+Visual *visual;
+Colormap colormap;
+Window win;
+
+Wnd window;
 
 // Callback to send data from libvterm back to shell
 int write_to_pty(const char *s, long unsigned int len, void *user) {
@@ -34,26 +39,41 @@ XftColor xft_color_from_vterm(Display *dpy, Visual *visual, Colormap colormap, V
     xrcolor.alpha = 0xFFFF;
 
     XftColor xftcolor;
-    XftColorAllocValue(dpy, visual, colormap, &xrcolor, &xftcolor);
+    if (!XftColorAllocValue(dpy, visual, colormap, &xrcolor, &xftcolor)) {
+        fprintf(stderr, "Failed to allocate color: %d, %d, %d\n", 
+                vtcolor->rgb.red, vtcolor->rgb.green, vtcolor->rgb.blue);
+        // Fallback to white if color allocation fails
+        xftcolor.pixel = WhitePixel(dpy, DefaultScreen(dpy));
+        xftcolor.color = xrcolor;
+    }
     return xftcolor;
 }
 
 int main() {
 
-    // Initial window settings
-    int WIDTH = 800;
-    int HEIGHT = 600;
-    int COLS = WIDTH / 10;
-    int ROWS = HEIGHT / 16;
+    window.width = 800;
+    window.height = 600;
 
     // Xlib init
-    Display *dpy = XOpenDisplay(NULL);
+    dpy = XOpenDisplay(NULL);
     if (!dpy) return 1;
     int screen = DefaultScreen(dpy);
 	Window root = RootWindow(dpy, screen);
 
-	Visual *visual = DefaultVisual(dpy, screen);
-	Colormap colormap = XCreateColormap(dpy, root, visual, AllocNone);
+    char font_name[50];
+    sprintf(font_name, "monospace-%d", font_size);
+    xftFont = XftFontOpenName(dpy, DefaultScreen(dpy), font_name);
+
+    XGlyphInfo extents;
+    XftTextExtentsUtf8(dpy, xftFont, (FcChar8 *)"M", 1, &extents);
+    window.char_width = extents.xOff;
+    window.char_height = xftFont->height;
+
+    window.cols = window.width / window.char_width;
+    window.rows = window.height / window.char_height;
+
+	visual = DefaultVisual(dpy, screen);
+	colormap = XCreateColormap(dpy, root, visual, AllocNone);
 
 	XSetWindowAttributes attrs;
 	attrs.colormap = colormap;
@@ -61,10 +81,10 @@ int main() {
 	attrs.border_pixel = WhitePixel(dpy, screen);
 	attrs.event_mask = ExposureMask | KeyPressMask | StructureNotifyMask;
 
-	unsigned long valuemask = CWColormap | CWBackPixel | CWBorderPixel | CWEventMask;
+	ulong valuemask = CWColormap | CWBackPixel | CWBorderPixel | CWEventMask;
 
-    Window win = XCreateWindow(dpy, root, 100, 100,
-			WIDTH, HEIGHT, 1, DefaultDepth(dpy, screen),
+    win = XCreateWindow(dpy, root, 100, 100,
+			window.width, window.height, 1, DefaultDepth(dpy, screen),
 			InputOutput, visual, valuemask, &attrs);
     XMapWindow(dpy, win);
 
@@ -73,48 +93,65 @@ int main() {
     if (!font) return 1;
     XSetFont(dpy, gc, font->fid);
 
-    XftFont *xftFont = XftFontOpenName(dpy, screen, "monospace-14");
-    XftDraw *draw = XftDrawCreate(dpy, win, visual, colormap);
+    xftFont = XftFontOpenName(dpy, screen, font_name);
+    draw = XftDrawCreate(dpy, win, visual, colormap);
 
     setenv("TERM", "xterm-256color", 1);
+    setenv("COLORTERM", "truecolor", 1);
 
-    // PTY + shell
     int masterFd;
     pid_t pid = forkpty(&masterFd, NULL, NULL, NULL);
     if (pid == 0) {
-        execlp("bash", "bash", NULL);
+        char *shell = getenv("SHELL");
+        if (!shell) shell = "/bin/bash";
+        execlp(shell, shell, "-l", NULL);
+        perror("exec");
         exit(1);
     }
 
     // libvterm init
-    VTerm *vt = vterm_new(ROWS, COLS);
+    VTerm *vt = vterm_new(window.rows, window.cols);
     vterm_set_utf8(vt, 1);
     vterm_output_set_callback(vt, (void*)write_to_pty, &masterFd);
     VTermScreen *vtermScreen = vterm_obtain_screen(vt);
     vterm_screen_reset(vtermScreen, 1);
 
     VTermState *vtermState = vterm_obtain_state(vt);
+    vterm_state_set_bold_highbright(vtermState, 1);
+
+    VTermColor default_fg, default_bg;
+    vterm_state_get_default_colors(vtermState, &default_fg, &default_bg);
+
+    vterm_state_set_palette_color(vtermState, 0, &(VTermColor){.rgb = {0, 0, 0}});       // Black
+    vterm_state_set_palette_color(vtermState, 1, &(VTermColor){.rgb = {255, 0, 0}});     // Red
+    vterm_state_set_palette_color(vtermState, 2, &(VTermColor){.rgb = {0, 255, 0}});     // Green
+    vterm_state_set_palette_color(vtermState, 3, &(VTermColor){.rgb = {255, 255, 0}});   // Yellow
+    vterm_state_set_palette_color(vtermState, 4, &(VTermColor){.rgb = {0, 0, 255}});     // Blue
+    vterm_state_set_palette_color(vtermState, 5, &(VTermColor){.rgb = {255, 0, 255}});   // Magenta
+    vterm_state_set_palette_color(vtermState, 6, &(VTermColor){.rgb = {0, 255, 255}});   // Cyan
+    vterm_state_set_palette_color(vtermState, 7, &(VTermColor){.rgb = {255, 255, 255}}); // White
+
+    vterm_screen_enable_altscreen(vtermScreen, 1);
 
     char buf[1024];
 
     XftColor xft_bg;
-    XRenderColor bg_color = {
-        .red = 0,
-        .green = 0,
-        .blue = 0,
-        .alpha = 0xFFFF,
+    XRenderColor bg_render_color = {
+        .red    = bg_color.red,
+        .green  = bg_color.green,
+        .blue   = bg_color.blue,
+        .alpha  = bg_color.alpha,
     };
-    XftColorAllocValue(dpy, visual, colormap, &bg_color, &xft_bg);
+    XftColorAllocValue(dpy, visual, colormap, &bg_render_color, &xft_bg);
 
     XftColor xft_fg;
-    XRenderColor fg_color = {
-        .red = convert_color_component(255),
-        .green = convert_color_component(255),
-        .blue = convert_color_component(255),
-        .alpha = 0xFFFF,
+    XRenderColor fg_render_color = {
+        .red    = fg_color.red,
+        .green  = fg_color.green,
+        .blue   = fg_color.blue,
+        .alpha  = fg_color.alpha,
     };
-
-    XftColorAllocValue(dpy, visual, colormap, &fg_color, &xft_fg);
+    XftColorAllocValue(dpy, visual, colormap, &fg_render_color, &xft_fg);
 
 
     XftColor xftCursor;
@@ -125,8 +162,6 @@ int main() {
         .alpha = 0xFFFF,
     };
     XftColorAllocValue(dpy, visual, colormap, &cursorColor, &xftCursor);
-
-
 
     while (1) {
         fd_set fds;
@@ -143,6 +178,11 @@ int main() {
             if (len > 0) {
                 vterm_input_write(vt, buf, len);
                 vterm_screen_flush_damage(vtermScreen);
+            } else if (len == 0) {
+                break;
+            } else {
+                perror("read from shell");
+                break;
             }
         }
 
@@ -157,58 +197,67 @@ int main() {
 
                     int new_width = ev.xconfigure.width;
                     int new_height = ev.xconfigure.height;
-                    int new_cols = new_width / FONT_WIDTH;
-                    int new_rows = new_height / FONT_HEIGHT;
+                    int new_cols = new_width / window.char_width;
+                    int new_rows = new_height / window.char_height;
 
-                    if (new_cols != COLS || new_rows != ROWS) {
-                        WIDTH = new_width;
-                        HEIGHT = new_height;
-                        COLS = new_cols;
-                        ROWS = new_rows;
-                        vterm_set_size(vt, ROWS, COLS);
+                    if (new_cols != window.cols || new_rows != window.rows) {
+                        window.width = new_width;
+                        window.height = new_height;
+                        window.cols = new_cols;
+                        window.rows = new_rows;
+                        vterm_set_size(vt, window.rows, window.cols);
                         XftDrawChange(draw, win);
                     }
                 }
             }
         }
 
-        // Draw screen
-        // XClearWindow(dpy, win);
-        XftDrawRect(draw, &xft_bg, 0, 0, WIDTH, HEIGHT);
+        XftDrawRect(draw, &xft_bg, 0, 0, window.width, window.height);
         VTermScreenCell cell;
         VTermPos pos;
 
-        for (int row = 0; row < ROWS; row++) {
-            for (int col = 0; col < COLS; col++) {
+        // Render loop
+        for (int row = 0; row < window.rows; row++) {
+            for (int col = 0; col < window.cols; col++) {
                 pos.row = row;
                 pos.col = col;
                 if (!vterm_screen_get_cell(vtermScreen, pos, &cell)) continue;
                 if (cell.chars[0] == 0) continue;
 
                 XftColor xft_fg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.fg);
+                XftColor xft_bg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.bg);
 
-                XSetForeground(dpy, gc, WhitePixel(dpy, screen));
+                XftDrawRect(draw, &xft_bg_cell, 
+                            col * window.char_width, 
+                            row * window.char_height, 
+                            window.char_width, 
+                            window.char_height);
 
-                // XftDrawStringUtf8(draw, &xft_fg, xftFont, col * FONT_WIDTH, (row + 1) * xftFont->height, (FcChar8*)cell.chars , strlen((char*)cell.chars));
+                // XSetForeground(dpy, gc, WhitePixel(dpy, screen));
 
                 XftDrawStringUtf8(draw, &xft_fg_cell, xftFont,
-                    col * FONT_WIDTH,
-                    (row + 1) * xftFont->height,
+                    col * window.char_width,
+                    (row + 1) * window.char_height,
                     (FcChar8*)cell.chars,
                     strlen((char*)cell.chars));
 
                 XftColorFree(dpy, visual, colormap, &xft_fg_cell);
+                XftColorFree(dpy, visual, colormap, &xft_bg_cell);
             }
         }
 
         VTermPos cursorPos;
         vterm_state_get_cursorpos(vtermState, &cursorPos);
 
-        XftDrawRect(draw, &xftCursor, cursorPos.col * FONT_WIDTH, (cursorPos.row + 1) * xftFont->height - FONT_HEIGHT, FONT_WIDTH, FONT_HEIGHT);
+        XftDrawRect(draw, &xftCursor, cursorPos.col * window.char_width, 
+            (cursorPos.row +1) * window.char_height - window.char_height + 8,
+            window.char_width, window.char_height - 5);
 
         XFlush(dpy);
+        fflush(stdout);
     }
 
+    close(masterFd);
 	XFreeColormap(dpy, colormap);
     XftColorFree(dpy, visual, colormap, &xftCursor);
 	vterm_free(vt);

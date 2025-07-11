@@ -18,7 +18,7 @@ X11LIB = /usr/X11R6/lib
 
 CFLAGS = -Wall -Wextra
 
-INCS = -I$(X11INC) -I/usr/include/freetype2
+INCS = -I$(X11INC) -I/usr/include/freetype2 -I./ -I$(SRCDIR)
 LIBS = -L$(X11LIB) -lX11 -lvterm -lXft -lfreetype -util
 
 all: clean build run
