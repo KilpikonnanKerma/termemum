@@ -1,34 +1,47 @@
 
 CC=gcc
+ASM=nasm
 
 SRCDIR = src
 BINDIR = bin
 
 OUTPUT = $(BINDIR)/termemum
-INSTALL_NAME = termemum
-INSTALL_PATH = /usr/local/bin
-
 TEMP_DIR = tmp
 DESKTOP_FILE = termemum.desktop
 DESKTOP_PATH_USER = $(HOME)/.local/share/applications
 
-# X11 stuff
+C_SRCS := $(wildcard $(SRCDIR)/*.c)
+C_OBJS := $(patsubst $(SRCDIR)/%.c,$(TEMP_DIR)/%.o,$(C_SRCS))
+ASM_OBS := $(TEMP_DIR)/main.o
+
+INSTALL_NAME = termemum
+INSTALL_PATH = /usr/local/bin
+
 X11INC = /usr/X11R6/include
 X11LIB = /usr/X11R6/lib
 
 CFLAGS = -Wall -Wextra
+ASM_FLAGS = -f elf64
 
 INCS = -I$(X11INC) -I/usr/include/freetype2 -I./ -I$(SRCDIR)
 LIBS = -L$(X11LIB) -lX11 -lvterm -lXft -lfreetype -util
 
-all: clean build run
+all: clean make_directories build run
 
-make_direcories:
+make_directories:
 	mkdir -p $(BINDIR)
 	mkdir -p $(TEMP_DIR)
 
-build: make_direcories
-	$(CC) $(INCS) $(CFLAGS) $(SRCDIR)/*.c -o $(OUTPUT) $(LIBS)
+$(TEMP_DIR)/%.o: $(SRCDIR)/%.c
+	$(CC) -c $< -o $@ $(CFLAGS) $(INCS)
+
+$(ASM_OBJ): $(SRCDIR)/main.asm
+	$(ASM) $(ASM_FLAGS) $< -o $@
+
+$(OUTPUT): $(ASM_OBJ) $(C_OBJS)
+	$(CC) -nostdlib -no-pie -Wl,--build-id=none $^ -o $@ $(LIBS)
+
+build: $(OUTPUT)
 
 run:
 	./$(OUTPUT)

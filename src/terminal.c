@@ -58,14 +58,11 @@ XftColor xft_color_from_vterm(Display *dpy, Visual *visual, Colormap colormap, V
     return color_cache[idx];
 }
 
-int main() {
+int term_main(Display* dpy, Window win) {
 
     window.width = 800;
     window.height = 600;
 
-    // Xlib init
-    dpy = XOpenDisplay(NULL);
-    if (!dpy) return 1;
     int screen = DefaultScreen(dpy);
 	Window root = RootWindow(dpy, screen);
 
@@ -95,9 +92,6 @@ int main() {
 
 	ulong valuemask = CWColormap | CWBackPixel | CWBorderPixel | CWEventMask;
 
-    win = XCreateWindow(dpy, root, 100, 100,
-			window.width, window.height, 1, vinfo.depth,
-			InputOutput, visual, valuemask, &attrs);
     XMapWindow(dpy, win);
 
     GC gc = XCreateGC(dpy, win, 0, NULL);
@@ -183,6 +177,7 @@ int main() {
             if (len > 0) {
                 vterm_input_write(vt, buf, len);
                 vterm_screen_flush_damage(vtermScreen);
+                need_redraw = true;
             } else if (len == 0) {
                 break;
             } else {
@@ -198,12 +193,15 @@ int main() {
                 XNextEvent(dpy, &ev);
                 if (ev.type == KeyPress) {
                     handle_keypress(&ev.xkey, vt, masterFd);
+                    need_redraw = true;
                 } else if (ev.type == ConfigureNotify) {
 
                     int new_width = ev.xconfigure.width;
                     int new_height = ev.xconfigure.height;
                     int new_cols = new_width / window.char_width;
                     int new_rows = new_height / window.char_height;
+
+                    need_redraw = true;
 
                     if (new_cols != window.cols || new_rows != window.rows) {
                         window.width = new_width;
@@ -212,6 +210,11 @@ int main() {
                         window.rows = new_rows;
                         vterm_set_size(vt, window.rows, window.cols);
                         XftDrawChange(draw, win);
+
+                        char new_font_name[50];
+                        XftDraw *new_draw = XftDrawCreate(dpy, win, visual, colormap);
+
+                        draw = new_draw;
                     }
                 }
             }
@@ -220,6 +223,11 @@ int main() {
         XftDrawRect(draw, &xft_bg, 0, 0, window.width, window.height);
         VTermScreenCell cell;
         VTermPos pos;
+
+        if(!need_redraw) {
+            usleep(16666);
+            continue;
+        }
 
         // Render loop
         for (int row = 0; row < window.rows; row++) {
@@ -240,7 +248,7 @@ int main() {
                     xft_bg_cell.color.blue != bg_render_color.blue) {
                     XftDrawRect(draw, &xft_bg_cell,
                         col * window.char_width,
-                        row * window.char_height,
+                        (row + 1) * window.char_height - window.char_height + 8,
                         window.char_width,
                         window.char_height);
                 }
@@ -267,6 +275,8 @@ int main() {
 
         XFlush(dpy);
         fflush(stdout);
+        
+        usleep(16666);
     }
 
     close(masterFd);

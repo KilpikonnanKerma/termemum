@@ -6,3 +6,6 @@ bin/
 
 # Installation files
 tmp/
+
+# other stuff
+asm/
