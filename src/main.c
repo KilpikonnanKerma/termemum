@@ -159,10 +159,10 @@ int main() {
 
     XftColor xftCursor;
     XRenderColor cursorColor = {
-        .red = 0xFFFF,
-        .green = 0xFFFF,
-        .blue = 0xFFFF,
-        .alpha = 0xFFFF,
+        .red    = cursor_color.red,
+        .green  = cursor_color.green,
+        .blue   = cursor_color.blue,
+        .alpha  = cursor_color.alpha,
     };
     XftColorAllocValue(dpy, visual, colormap, &cursorColor, &xftCursor);
 
@@ -235,21 +235,15 @@ int main() {
                 XftColor xft_fg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.fg);
                 XftColor xft_bg_cell = xft_color_from_vterm(dpy, visual, colormap, &cell.bg);
 
-                if (xft_bg_cell.color.red != bg_render_color.red ||
-                    xft_bg_cell.color.green != bg_render_color.green ||
-                    xft_bg_cell.color.blue != bg_render_color.blue) {
-                    XftDrawRect(draw, &xft_bg_cell,
-                        col * window.char_width,
-                        row * window.char_height,
-                        window.char_width,
-                        window.char_height);
-                }
-
-                // XSetForeground(dpy, gc, WhitePixel(dpy, screen));
+                XftDrawRect(draw, &xft_bg_cell,
+                    col * window.char_width,
+                    row * window.char_height,
+                    window.char_width,
+                    window.char_height);
 
                 XftDrawStringUtf8(draw, &xft_fg_cell, xftFont,
                     col * window.char_width,
-                    (row + 1) * window.char_height,
+                    (row + 1) * window.char_height - window.char_height / 2 + 8,
                     (FcChar8*)cell.chars,
                     strlen((char*)cell.chars));
 
@@ -262,8 +256,8 @@ int main() {
         vterm_state_get_cursorpos(vtermState, &cursorPos);
 
         XftDrawRect(draw, &xftCursor, cursorPos.col * window.char_width, 
-            (cursorPos.row +1) * window.char_height - window.char_height + 8,
-            window.char_width, window.char_height - 5);
+            (cursorPos.row +1) * window.char_height - window.char_height,
+            window.char_width, window.char_height);
 
         XFlush(dpy);
         fflush(stdout);
