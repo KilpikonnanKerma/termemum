@@ -1,4 +1,3 @@
-#vscode
 .vscode/
 
 # Binaries
@@ -6,3 +5,7 @@ bin/
 
 # Installation files
 tmp/
+
+
+# Other
+config_test.h
