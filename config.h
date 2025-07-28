@@ -16,14 +16,17 @@
 
 */
 
+// Application title
+static const char* application_title = "Termemum";
+
 // Default font size
 static int font_size = 16;
 
 // Background color (Use hex color codes eg. #FFFF for white)
 static Color bg_color = {
-    .red = 0x1d00,
-    .green = 0x1d00,
-    .blue = 0x2000,
+    .red = 0x0000,
+    .green = 0x0000,
+    .blue = 0x0000,
     .alpha = 0xFFFF,
 };
 

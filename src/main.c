@@ -99,6 +99,7 @@ int main() {
 			window.width, window.height, 1, vinfo.depth,
 			InputOutput, visual, valuemask, &attrs);
     XMapWindow(dpy, win);
+    XStoreName(dpy, win, application_title);
 
     GC gc = XCreateGC(dpy, win, 0, NULL);
     XFontStruct *font = XLoadQueryFont(dpy, "fixed");
